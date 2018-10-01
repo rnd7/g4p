@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<!-- saved from url=(0025)http://goldsource.de/g4p/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta charset="utf-8">
+<title>G4P</title>
+<style type="text/css">
+  body{
+    background-color:#000000;
+    margin:0;
+    padding:0;
+    overflow:hidden;
+    color:#FFFFFF;
+    font-family:sans; 
+  }
+  h1, h2{
+    font-weight:normal;
+    font-size:16px; 
+  }
+  label{
+    font-size:11px;
+    display:block;
+  }
+  #screen{    
+    position:absolute;
+    left:0;
+    top:0;
+    bottom:0;
+    right:200px;
+  }
+  #panel{
+    position:absolute;
+    right:0px;
+    top:0px;
+    bottom:0px;
+    width:214px;
+    overflow-y:scroll;
+    padding-left:6px;  
+  }
+</style>
+<!-- jQuery, DOM editing and more, MIT License, http://jquery.com/ -->
+<script
+  src="https://code.jquery.com/jquery-2.2.4.min.js"
+  integrity="sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44="
+  crossorigin="anonymous"></script>
+</head>
+<body>
+<canvas id="screen" width="2340" height="1278"></canvas>
+<div id="panel">
+<h1>G4P - Gravity for Particles</h1><h1>
+</h1><h2>Engine</h2>
+<label for="gravitational_constant">Gravitation Constant</label>
+<input id="gravitational_constant" name="gravitational_constant" type="number">
+<label for="max_speed">Max Speed</label>
+<input id="max_speed" name="max_speed" type="number">
+<label for="power_damping">Power Damping</label>
+<input id="power_damping" name="power_damping" type="checkbox">
+<label for="bounds_mode">Bounds Mode</label>
+<select id="bounds_mode" name="bounds_mode"><option value="WRAP" selected="selected">WRAP</option><option value="BOUNCE">BOUNCE</option><option value="CLIP">CLIP</option><option value="CLAMP">CLAMP</option><option value="KILL">KILL</option><option value="NONE">NONE</option></select>
+<label for="collision_mode">Collision Mode</label>
+<select id="collision_mode" name="collision_mode"><option value="SWALLOW" selected="selected">SWALLOW</option><option value="BOUNCE">BOUNCE</option><option value="KILL">KILL</option></select>
+<label for="collision_threshold">Collision Threshold</label>
+<input id="collision_threshold" name="collision_threshold" type="number"> 
+<label for="center_cheat_power">Center Cheat</label>
+<input id="center_cheat_power" name="center_cheat_power" type="number">
+<label for="explosion_threshold">Explosion Threshold</label>
+<input id="explosion_threshold" name="explosion_threshold" type="number">
+<label for="explosion_power">Explosion Power</label>
+<input id="explosion_power" name="explosion_power" type="number">
+<h2>Generator</h2>
+<label for="elements">Elements</label>
+<input id="elements" name="elements" type="number">
+<label for="min_mass">Min Mass</label>
+<input id="min_mass" name="min_mass" type="number">
+<label for="max_mass">Max Mass</label>
+<input id="max_mass" name="max_mass" type="number">
+<label for="radius">Radius</label>
+<input id="radius" name="radius" type="number">
+<label for="start_angle">Start Angle</label>
+<input id="start_angle" name="start_angle" type="number">
+<label for="start_speed_factor">Start Speed Factor</label>
+<input id="start_speed_factor" name="start_speed_factor" type="number">
+<label for="use_center">Use Center</label>
+<input id="use_center" name="use_center" type="checkbox" checked="checked">
+<label for="start_speed_factor">Mass of Center</label>
+<input id="center_mass" name="center_mass" type="number">
+<button id="generate">generate</button>
+<h2>Graphics</h2>
+<label for="show_traces">Traces</label>
+<input id="show_traces" name="show_traces" type="checkbox">
+<label for="log_scale">Logarithmic scale</label>
+<input id="log_scale" name="log_scale" type="checkbox" checked="checked">
+</div>
+<script>
+/*
+* G4P
+* Particle dynamics tech demo. 
+*
+* You might use this within your work. But beware the code is dirty, probably
+* dangerous and definitely incorrect. Furthermore it's almost uncommented. I
+* won't apologize again.
+* 
+* The source code is released under the MIT License. 
+* http://opensource.org/licenses/MIT
+*
+* The MIT License (MIT)
+*
+* Copyright (c) 2014 goldsource
+*
+* Permission is hereby granted, free of charge, to any person obtaining a
+* copy of this software and associated documentation files (the "Software"),
+* to deal in the Software without restriction, including without limitation
+* the rights to use, copy, modify, merge, publish, distribute, sublicense,
+* and/or sell copies of the Software, and to permit persons to whom the
+* Software is furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be included in
+* all copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+* THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+*/
+var Geom = { 
+  sqdistance: function(pointA,pointB){          
+    var dx = pointA.x - pointB.x;
+    var dy = pointA.y - pointB.y;
+    return Math.pow(dx,2)+Math.pow(dy,2);
+  },
+  distance: function(pointA,pointB){   
+    return Math.sqrt(Geom.sqdistance(pointA,pointB));
+  },
+  vectorRad: function(pointA,pointB){
+    var dy = pointB.y - pointA.y;
+    var dx = pointB.x - pointA.x;
+    return Math.atan2(dy, dx);       
+  },
+  vectorAngle: function(pointA,pointB){
+    return Geom.vectorRad(pointA,pointB) * 180/Math.PI;       
+  },
+  angleDelta: function(a,b){
+    return Math.atan2(Math.sin(a-b), Math.cos(a-b))
+  },
+  rotatePoint: function(p, o, t) {
+    return {
+      x: Math.cos(t) * (p.x-o.x) - Math.sin(t) * (p.y-o.y) + o.x,
+      y: Math.sin(t) * (p.x-o.x) + Math.cos(t) * (p.y-o.y) + o.y
+    };
+  },
+  getProximity: function(p,a){
+    var best = -1;
+    var dist = 0;
+    var min = Number.POSITIVE_INFINITY;
+    for(var i=0;i<a.length;i++){
+      dist = Geom.sqdistance(p,a[i]);
+      if(dist<min){
+        min = dist;
+        best = i;
+      }
+    }
+    return a[best];
+  },
+  arcPoint: function(p, t, l){
+    return {x:p.x+l*Math.cos(t),y:p.y+l*Math.sin(t)}
+  },
+  getCenter: function(p){
+    var mp = {x:0,y:0};
+    var p_length = p.length;
+    for(var i=0; i<p_length;i++){
+      mp.x += p[i].x;
+      mp.y += p[i].y;    
+    }
+    mp.x /= p_length;
+    mp.y /= p_length;
+    return mp;
+  },
+  makeNgon: function(
+    sides, // int
+    radius, // float
+    offset, // Point
+    angle // float - angle to start with
+  ){
+    var points = [];
+    var increment = 2*Math.PI/sides;
+    for (var i = 0; i<sides; i++){                  
+        points.push(
+          {
+            x:offset.x + radius * Math.cos(angle),
+            y:offset.y + radius * Math.sin(angle)
+          }
+        );
+        angle += increment;
+    }
+    return points;
+  },
+}
+
+function G4P(){ 
+  this.COLLISION_METHOD = {
+    SWALLOW: function(a,b){      
+      if(a.mass < b.mass) b = [a, a = b][0]; //swap
+      var f = Math.pow(b.mass/a.mass,1);
+      a.speed.x+=b.speed.x*f;
+      a.speed.y+=b.speed.y*f;
+      a.mass += b.mass;
+      b.destroy = true;
+    },
+    BOUNCE: function(a,b){
+      var D_BALL_ELASTIC_COEFFICIENT = 0;
+      var   dx = a.x - b.x, dy = a.y - b.y;
+      var   distance = Math.sqrt(dx*dx + dy*dy);
+      var   vp1, vp2;
+      a.speed.y = a.speed.y;
+      vy2 = b.speed.y;
+      vp1 = a.speed.x * dx / distance + a.speed.y * dy / distance;
+      vp2 = b.speed.x * dx / distance + b.speed.y * dy / distance;    
+      var   ax = dx / distance, ay = dy / distance;  
+      var   va1 = a.speed.x * ax + a.speed.y * ay, 
+      va = -a.speed.x * ay + a.speed.y * ax,
+      va2 = b.speed.x * ax + b.speed.y * ay, 
+      vb = -b.speed.x * ay + b.speed.y * ax;  
+      var   vaP2 = va2 + (1.0 + D_BALL_ELASTIC_COEFFICIENT) * (va1 - va2) / (1.0 + b.mass / a.mass);
+      var   vaP1 = va1 + (1.0 + D_BALL_ELASTIC_COEFFICIENT) * (va2 - va1) / (1.0 + a.mass / b.mass);  
+      a.speed.x = vaP1 * ax - va * ay; 
+      a.speed.y = vaP1 * ay + va * ax; // new vx,vy for ball 1 after collision.
+      b.speed.x = vaP2 * ax - vb * ay; 
+      b.speed.y = vaP2 * ay + vb * ax; // new vx,vy for ball 2 after collision.
+    },
+    KILL: function(a,b){
+      a.destroy = true;
+      b.destroy = true;
+    }
+  }
+  this.BOUNDS_METHOD = {
+    WRAP: function(elem,bounds){                           
+      if(elem.x<bounds.x){
+        var dx = bounds.x-elem.x;
+        elem.x = bounds.x+bounds.width-dx;
+      }else if(elem.x>bounds.x+bounds.width){
+        var dx = bounds.x+bounds.width-elem.x;
+        elem.x = bounds.x+dx;
+      }
+      if(elem.y<bounds.y){
+        var dy = bounds.y-elem.y;
+        elem.y = bounds.y+bounds.height+dy;
+      }else if(elem.y>bounds.y+bounds.height){
+        var dy = bounds.y+bounds.height-elem.y;
+        elem.y = bounds.y+dy;
+      }
+    },
+    BOUNCE: function(elem,bounds){
+      if(elem.x<bounds.x){
+        var dx = bounds.x-elem.x;
+        elem.x = bounds.x+dx;
+        if(elem.speed.x<0) elem.speed.x *=-1;
+      }else if(elem.x>bounds.x+bounds.width){
+        var dx = bounds.x+bounds.width-elem.x;
+        elem.x = bounds.x+bounds.width+dx;
+        if(elem.speed.x>0) elem.speed.x *=-1;
+      }
+      if(elem.y<bounds.y){
+        var dy = bounds.y-elem.y;
+        elem.y = bounds.y+dy;
+        if(elem.speed.y<0) elem.speed.y *=-1;
+      }else if(elem.y>bounds.y+bounds.height){
+        var dy = bounds.y+bounds.height-elem.y;
+        elem.y = bounds.y+bounds.height+dy;
+        if(elem.speed.y>0) elem.speed.y *=-1;
+      }
+    },
+    CLIP: function(elem,bounds){
+      elem.x = Math.max(bounds.x,Math.min(bounds.x+bounds.width,elem.x));
+      elem.y = Math.max(bounds.y,Math.min(bounds.y+bounds.height,elem.y));
+    },
+    CLAMP: function(elem,bounds){
+      if(elem.x<=bounds.x||elem.x>=bounds.width){
+        elem.x = Math.max(bounds.x,Math.min(bounds.width,elem.x));
+        elem.speed.x = 0;
+      }        
+      if(elem.y<=bounds.y||elem.y>=bounds.height){
+        elem.y = Math.max(bounds.y,Math.min(bounds.height,elem.y));
+        elem.speed.y = 0;
+      }
+    },
+    KILL: function(elem,bounds){
+      if(elem.x<=bounds.x||elem.x>=bounds.width ||
+        elem.y<=bounds.y||elem.y>=bounds.height
+      )elem.destroy=true;
+    },
+    NONE: function(elem,bounds){},
+  }
+  var world = [],
+  bounds = {x:0,y:0,width:640,height:480},
+  max_speed = 3.1,
+  gravitational_constant = 0.11,
+  bounds_method = "WRAP",
+  collision_threshold = 1,
+  collision_method = "SWALLOW",
+  explosion_threshold = 100,
+  explosion_particle_mass = 1,
+  explosion_power = 3;
+  center_cheat_power = 0.05;
+  power_damping = false;
+  this.explosion_threshold = function(v){
+    if(typeof v === 'number' && !isNaN(v)) explosion_threshold = v;
+    return explosion_threshold;
+  } 
+  this.center_cheat_power = function(v){
+    if(typeof v === 'number' && !isNaN(v)) center_cheat_power = v;
+    return center_cheat_power;
+  }
+  this.explosion_power = function(v){
+    if(typeof v === 'number' && !isNaN(v)) explosion_power = v;
+    return explosion_power;
+  }
+  this.explosion_particle_mass = function(v){
+    if(typeof v === 'number' && !isNaN(v)) explosion_particle_mass = v;
+    return explosion_particle_mass;
+  }
+  this.collision_threshold = function(v){
+    if(typeof v === 'number' && !isNaN(v)) collision_threshold = v;
+    return collision_threshold;
+  }
+  this.power_damping = function(v){
+    if(typeof v === 'boolean') power_damping = v;
+    return power_damping;
+  }
+  this.bounds_method = function(v){    
+    if(v){
+      if(typeof v === 'function'){
+        bounds_method = 'user';
+        this.BOUNDS_METHOD['user']=v;
+      }else if(typeof v === 'string'){
+        bounds_method = v.toUpperCase();
+      }
+    }
+    return bounds_method;
+  }
+  this.collision_method = function(v){    
+    if(v){
+      if(typeof v === 'function'){
+        collision_method = 'user';
+        this.COLLISION_METHOD['user']=v;
+      }else if(typeof v === 'string'){
+        collision_method = v.toUpperCase();
+      } 
+    }
+    return collision_method;
+  }
+  this.max_speed = function(v){
+    if(typeof v === 'number' && !isNaN(v)) max_speed = v;
+    return max_speed;
+  }
+  this.gravitational_constant = function(v){
+    if(typeof v === 'number' && !isNaN(v)) gravitational_constant = v;
+    return gravitational_constant;
+  }
+  this.bounds = function(v){
+    if(!v)return bounds;
+    bounds.x = v.x||bounds.x;
+    bounds.y = v.y||bounds.y;
+    bounds.width = v.width||bounds.width;
+    bounds.height = v.height||bounds.height;
+  }
+  this.append = function(d){
+    world.push(makeElement(d));
+  }
+  function makeElement(d){
+    d = d||{};
+    d.speed = d.speed||{};
+    return {
+      x:d.x||bounds.width/2,
+      y:d.y||bounds.height/2,
+      speed:{x:d.speed.x||0,y:d.speed.y||0},
+      mass:d.mass||1,
+      destroy:false,
+    };
+  }
+  this.clear = function(){
+    world.length = 0;
+  }
+  this.world = function(){
+    return world;
+  }  
+  this.update = function(){
+    for(var i=0;i<world.length;i++){    
+      var elem = world[i];
+      if(elem.destroy){        
+        world.splice(i,1);
+        i--;
+        continue
+      }
+      if(elem.mass>=explosion_threshold){   
+        while(elem.mass>=0){
+          elem.mass-=explosion_particle_mass;          
+          var t = (Math.random()*360)*Math.PI/180;
+          var p = 1+Math.random()*explosion_power;
+          world.push(makeElement({
+            mass:explosion_particle_mass,
+            x:elem.x+p*Math.cos(t),
+            y:elem.y+p*Math.sin(t),
+            speed:{
+              x:elem.speed.x+p*Math.cos(t),
+              y:elem.speed.y+p*Math.sin(t),
+            },
+          }));            
+        }
+        world.splice(i,1);
+        i--;
+        continue;
+      }
+      if(center_cheat_power != 0){
+        var t = Geom.vectorRad(elem,{x:width/2,y:height/2})
+        var p = Math.random()*center_cheat_power;
+        elem.speed.x+=Math.cos(t)*p;
+        elem.speed.y+=Math.sin(t)*p;
+      }
+      var elem_speed = Math.sqrt(
+        Math.pow(elem.speed.x,2)+Math.pow(elem.speed.y,2)
+      );    
+      if(elem_speed>max_speed){
+        elem.speed.x /= elem_speed/max_speed;
+        elem.speed.y /= elem_speed/max_speed;
+      }
+      elem.x+=elem.speed.x;
+      elem.y+=elem.speed.y;
+      this.BOUNDS_METHOD[bounds_method](elem,bounds);
+    }
+    for(var i=0;i<world.length-1;i++){         
+      var elem = world[i];
+      if(elem.destroy)continue;
+      for(var j = i+1;j<world.length;j++){
+        var other = world[j];
+        if(other.destroy)continue;
+        var dist = Geom.sqdistance(elem,other);
+        if(Math.sqrt(dist)<=collision_threshold){
+          this.COLLISION_METHOD[collision_method](elem,other);
+          continue;
+        }
+        var rad = Geom.vectorRad(elem,other),
+        fm1 = gravitational_constant*((elem.mass*other.mass)/(dist+0.00001)),        
+        force = {x:fm1*Math.cos(rad),y:fm1*Math.sin(rad)},
+        ef=1,of=1;
+        if(power_damping){
+          var elem_speed = Math.sqrt(Math.pow(elem.speed.x,2)+
+            Math.pow(elem.speed.y,2));
+          var other_speed = Math.sqrt(Math.pow(other.speed.x,2)+
+            Math.pow(other.speed.y,2));
+          ef = (elem_speed)/max_speed;
+          of = (other_speed)/max_speed;
+        }
+        elem.speed.x +=(force.x*ef)/elem.mass;
+        elem.speed.y +=(force.y*ef)/elem.mass;
+        other.speed.x -=(force.x*of)/other.mass;
+        other.speed.y -=(force.y*of)/other.mass;        
+      }
+    }
+    
+  }
+}
+
+var cv = document.getElementById("screen"),
+ctx = cv.getContext("2d"),
+radius = 200,
+width = 640,
+height = 480,
+fps = 30,
+mouse = {x:0,y:0},
+center,
+elements = 300,
+max_mass = 10,
+min_mass = 2,
+radius = 180,
+start_angle = 60,
+start_speed_factor = 1.9,
+use_center = true,
+show_traces = false,
+log_scale = true,
+center_mass = 50,
+g4p = new G4P();
+function resize(){ 
+  width = window.innerWidth || 
+    document.documentElement.clientWidth ||
+    document.getElementsByTagName('body')[0].clientWidth;
+  width -= 220;
+  height = window.innerHeight ||
+    document.documentElement.clientHeight ||
+    document.getElementsByTagName('body')[0].clientHeight;
+  cv.width=ctx.width=width;
+  cv.height=ctx.height=height;
+  g4p.bounds({width:width,height:height});
+}
+function update(){
+  for(var i=0;i<1;i++)g4p.update();
+  if(show_traces){
+   ctx.fillStyle ="rgba(0,0,0,0.1)";
+   ctx.fillRect(0,0,width,height);
+  }else{  
+    ctx.clearRect(0,0,width,height);
+  }
+  ctx.save();
+  world = g4p.world();
+  for(var i=0;i<world.length;i++){
+    ctx.save();
+    ctx.translate(world[i].x,world[i].y);
+    ctx.beginPath();
+    var val = 255;
+    ctx.fillStyle = "rgba("+val+","+val+","+val+",1)";    
+    var size = (log_scale)?Math.max(1,Math.log(world[i].mass)):1;
+    ctx.arc(0,0,size,0,2*Math.PI);    
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+  
+}
+function onMouseMove(e){
+  var e = window.event?window.event:e;    
+  mouse.x=e.clientX;
+  mouse.y=e.clientY;
+ // blackHole.x = mouse.x;
+  //blackHole.y = mouse.y;
+}
+function onMouseClick(e){  
+  
+}
+function loop(){
+  update()
+  setTimeout(loop,1000/fps);
+}
+function onChange(e){
+  switch(this.name){
+    case "gravitational_constant": 
+      g4p.gravitational_constant(parseFloat($("#gravitational_constant").val()));
+      break;
+    case "max_speed": 
+      g4p.max_speed(parseFloat($("#max_speed").val()));
+      break;
+    case "power_damping": 
+      g4p.power_damping($("#power_damping").prop('checked'));
+      break;
+    case "bounds_mode": 
+      g4p.bounds_method($("#bounds_mode").val());
+      break;
+    case "collision_mode": 
+      g4p.collision_method($("#collision_mode").val());
+      break;
+    case "collision_threshold": 
+      g4p.collision_threshold(parseFloat($("#collision_threshold").val()));
+      break;
+    case "explosion_threshold": 
+      g4p.explosion_threshold(parseFloat($("#explosion_threshold").val()));
+      break;
+    case "explosion_power": 
+      g4p.explosion_power(parseFloat($("#explosion_power").val()));
+      break;
+    case "center_cheat_power":
+      g4p.center_cheat_power(parseFloat($("#center_cheat_power").val()));
+      break;
+    case "elements": 
+      elements = parseInt($("#elements").val());
+      break;
+    case "min_mass": 
+      min_mass = parseFloat($("#min_mass").val());
+      break;
+    case "max_mass": 
+      max_mass = parseFloat($("#max_mass").val());
+      break;
+    case "radius": 
+      radius = parseFloat($("#radius").val());
+      break;
+    case "start_angle": 
+      start_angle = parseFloat($("#start_angle").val());
+      break;
+    case "start_speed_factor": 
+      start_speed_factor = parseFloat($("#start_speed_factor").val());
+      break;
+    case "use_center": 
+      use_center = $("#use_center").prop('checked');
+      break;
+    case "center_mass": 
+      center_mass = parseFloat($("#center_mass").val());
+      break;
+    case "show_traces": 
+      show_traces = $("#show_traces").prop('checked');
+      break; 
+    case "log_scale": 
+      log_scale = $("#log_scale").prop('checked');
+      break;
+  } 
+  updateForm();
+}
+function updateForm(){
+  $("#gravitational_constant").val(g4p.gravitational_constant());
+  $("#max_speed").val(g4p.max_speed());
+  $("#power_damping").attr('checked', g4p.power_damping());
+  
+  $("#bounds_mode option[value='"+g4p.bounds_method()+"']").attr('selected',true);
+  $(
+    "#collision_mode option[value='"+g4p.collision_method()+"']"
+  ).attr('selected',true);
+  $("#collision_threshold").val(g4p.collision_threshold());
+  $("#explosion_threshold").val(g4p.explosion_threshold());
+  $("#explosion_power").val(g4p.explosion_power());
+  $("#center_cheat_power").val(g4p.center_cheat_power());
+  $("#elements").val(elements);
+  $("#min_mass").val(min_mass);
+  $("#max_mass").val(max_mass);
+  $("#radius").val(radius);
+  $("#start_angle").val(start_angle);
+  $("#start_speed_factor").val(start_speed_factor);
+  $("#use_center").attr('checked', use_center);
+  $("#center_mass").val(center_mass);
+  $("#show_traces").attr('checked', show_traces);
+  $("#log_scale").attr('checked', log_scale);
+}
+function initializeForm(){  
+  var bounds_mode = $('#bounds_mode');
+  for(var key in g4p.BOUNDS_METHOD){
+    bounds_mode.append($('<option></option>').val(key).html(key));
+  }
+  var collision_mode = $('#collision_mode');
+  for(var key in g4p.COLLISION_METHOD){
+    collision_mode.append($('<option></option>').val(key).html(key));
+  }
+  updateForm();
+}
+function generate(){
+  g4p.clear();
+  if(use_center){
+    g4p.append({
+      x:width/2,
+      y:height/2,                          
+      mass:center_mass
+    });    
+    center = g4p.world()[0];
+  }
+  for(var i=0;i<elements;i++){
+    var t = (Math.random()*360)*Math.PI/180;
+    var r = Math.random()*radius;
+    var st = t-start_angle*Math.PI/180;
+    g4p.append({
+      x:width/2+r*Math.cos(t),
+      y:height/2+r*Math.sin(t),
+      mass:min_mass+Math.random()*(max_mass-min_mass),
+      speed:{
+        x:Math.sqrt(r/200)*start_speed_factor*Math.cos(st),
+        y:Math.sqrt(r/200)*start_speed_factor*Math.sin(st),
+      },
+    });
+  } 
+}
+function onGenerate(e){
+console.log("onGenerate");
+  generate();
+}
+function init(){   
+  resize();  
+  generate();
+  $(window).mousemove(onMouseMove);
+  $(window).click(onMouseClick);
+  $("input").change(onChange);
+  $("select").change(onChange);
+  $("#generate").click(onGenerate);
+  initializeForm();
+  loop();
+}
+init();
+</script>
+
+
+</body></html>
